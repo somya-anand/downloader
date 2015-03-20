@@ -7,7 +7,8 @@ function usage {
  
 #Cleanup on kill
 function clean {
-  kill 0
+  echo 'Failing: cleaning up...'
+  kill -0 $$
   rm /tmp/$FILENAME.* 2> /dev/null
   echo "Download failed!"
   exit 1 
@@ -26,7 +27,8 @@ URL=$1
 
 FILENAME="`basename $URL`"
 
-SIZE="`curl -qI $URL 2> /dev/null|awk '/Length/ {print $2}'|grep -o '[0-9]*'`"
+echo 'get file size...'
+SIZE="`curl -qLI $URL 2> /dev/null|awk '/Length/ {print $2}'|grep -o '[0-9]*'`"
 SIZE=${SIZE:-1} 
 
 SPLITNUM=$((${SIZE:-0}/$SPLITSIZE))
@@ -38,35 +40,27 @@ CHUNK=$((${SIZE:-0}/$SPLITNUM))
 END=$CHUNK
 
 OUT_DIR=${downloader_output_dir:-$HOME/Downloads}
-
-# proxy
-proxy=${http_proxy:-$HTTP_PROXY}
  
 #Trap ctrl-c
 trap 'clean' SIGINT SIGTERM
  
+echo 'Testing file splitness...'
 #Test splitness
-OUT=`curl -m 2 --range 0-0 $URL 2> /dev/null|while read -n 1 C;do
-  OUT="${OUT}½"
-  echo $OUT
-  [ ${#OUT} -gt 1 ] && break
-done`
+curl -Lm 2 --range 0-0 $URL 2> /dev/null | read line
+OUT=${#line}
 
+echo '... got the results ... just verifying ' ${OUT}
 #Check out
-case ${#OUT} in
-0)  clean;; #Curl error
+case ${OUT} in
+0)  clean; echo 'exiting...';; #Curl error
 1)  ;; #Got a byte
-*)  echo Server does not spit...;SPLITNUM=1;; #Got more than asked for
+*)  echo 'Server does not spit...';SPLITNUM=1;; #Got more than asked for
 esac
  
+echo 'launching downloader threads...'
 #Invoke curls
 for PART in `eval echo {1..$SPLITNUM}`;do
-  if $proxy
-  then
-    curl --ftp-pasv -o "/tmp/$FILENAME.$PART" --range $START-$END --proxy $proxy $URL 2> /dev/null &
-  else
-    curl --ftp-pasv -o "/tmp/$FILENAME.$PART" --range $START-$END $URL 2> /dev/null &
-  fi
+  curl --ftp-pasv -Lo "/tmp/$FILENAME.$PART" --range $START-$END $URL 2> /dev/null &
   START=$(($START+$CHUNK+1))
   END=$(($START+$CHUNK))
 done
